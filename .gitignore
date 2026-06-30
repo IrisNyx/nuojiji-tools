@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# PyInstaller
+build/
+*.spec
+
+# IDE
+.vscode/
+.idea/
+
+# 临时诊断文件
+_*.py
+_*.txt
+_*.csv
+_*.html
+_*.json
+
+# 迁移任务（历史文件，非发布内容）
+迁移任务/
+
+# 不相关项目
+暗度陈仓/
+
+# 备份数据
+*.json.gz
+*_backup_*.json
+*_modified*.json
+*_verify*.json
+
+# 图片相关
+extracted_images/
+*.png
+
+# 其他临时文件
+analyze*.py
+test_engine.py
+verify_*.py
+extract_images.py
+inject_image.py
+*.pyw
+audit_report.*
+corrections .json
+format_*.txt
+format_*.py
+sample_formats.py
+WORKFLOW.md
+parse_*.py
+convert_*.py
+merge.py
+novelai_*.json
+xinsheng-*.json
+*.txt
+
+# 用户聊天数据
+chat_*.json
+tm_*.json
+
+# 残留旧 EXE（非 dist 目录内的）
+增量导入工具/增量导入工具.exe
