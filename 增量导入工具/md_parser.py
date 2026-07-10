@@ -79,6 +79,21 @@ def detect_mode(text):
     return "unknown", reasons
 
 
+# ── 思流新格式（含完整时间戳）───────────────
+# 👤/🤖 Name YYYY-MM-DD HH:MM:SS
+SIS_NEW_SPEAKER = re.compile(r'^(👤|🤖)\s+(.+?)\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s*$')
+# 元数据行: > 创建: ... | 更新: ... | 消息数: ...
+SIS_META_LINE = re.compile(r'^>\s*(创建|更新|消息数)[：:]')
+
+# 👤→user, 🤖→char
+SIS_EMOJI_ROLE = {"👤": "user", "🤖": "char"}
+
+
+def _detect_sis_format(text):
+    """检测是否为思流新格式（👤/🤖 + 完整时间戳）"""
+    return bool(re.search(r'^(👤|🤖)\s+\S+?\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}', text, re.MULTILINE))
+
+
 # ── 发言人解析正则 ──────────────────────────
 SPEAKER_INLINE = re.compile(r'^>\s*\*\*(.+?)\*\*\s*[：:]\s*(.*)$')
 SPEAKER_HEADER = re.compile(r'^\*\*(.+?)\*\*\s*[：:]?\s*$')
@@ -114,6 +129,7 @@ def extract_date_from_filename(fname):
 def parse_md_text(raw_text, source_filename="unknown.md"):
     """
     解析MD纯文本为消息列表。
+    支持三种格式: 旧版引用块(>)、JSON→MD反向导出、思流新格式(👤/🤖+时间戳)
     
     参数:
         raw_text: str — 完整的 .md 文件内容
@@ -129,8 +145,12 @@ def parse_md_text(raw_text, source_filename="unknown.md"):
             source_line: int
             speaker_name: str
             is_online:   bool — 简化标记 (mode=='online')
+            timestamp:   str | None — 思流格式的真实时间戳 (YYYY-MM-DD HH:MM:SS)
     """
     basename = os.path.basename(source_filename) if source_filename else "unknown.md"
+
+    # ── 格式检测 ──
+    is_sis = _detect_sis_format(raw_text)
 
     # ── 解析 frontmatter ──
     body = raw_text
@@ -148,10 +168,11 @@ def parse_md_text(raw_text, source_filename="unknown.md"):
     current_role = None
     current_lines = []
     current_start_line = 0
+    current_timestamp = None  # 思流格式：真实时间戳
     ctx_mode = "offline"
 
     def flush_message():
-        nonlocal current_speaker, current_role, current_lines, current_start_line, ctx_mode
+        nonlocal current_speaker, current_role, current_lines, current_start_line, ctx_mode, current_timestamp
         if current_speaker and current_lines:
             content = "\n".join(current_lines).strip()
             content = re.sub(r'\n{3,}', '\n\n', content)
@@ -171,7 +192,7 @@ def parse_md_text(raw_text, source_filename="unknown.md"):
                     mode = ctx_mode
                     reasons.append(f"CTX: mixed→{ctx_mode}")
 
-                messages.append({
+                msg = {
                     "role": current_role or "unknown",
                     "content": content,
                     "mode": mode,
@@ -180,7 +201,10 @@ def parse_md_text(raw_text, source_filename="unknown.md"):
                     "source_line": current_start_line + 1,
                     "speaker_name": current_speaker,
                     "is_online": mode == "online",
-                })
+                }
+                if current_timestamp:
+                    msg["timestamp"] = current_timestamp
+                messages.append(msg)
 
                 if mode in ("online", "offline"):
                     ctx_mode = mode
@@ -189,9 +213,50 @@ def parse_md_text(raw_text, source_filename="unknown.md"):
         current_role = None
         current_lines = []
         current_start_line = 0
+        current_timestamp = None
 
     for line_no, line in enumerate(lines):
         stripped = line.strip()
+
+        # ── 思流新格式：👤/🤖 Name YYYY-MM-DD HH:MM:SS ──
+        if is_sis:
+            m_sis = SIS_NEW_SPEAKER.match(stripped)
+            if m_sis:
+                flush_message()
+                emoji = m_sis.group(1)
+                name_raw = m_sis.group(2).strip()
+                current_timestamp = m_sis.group(3)
+                speaker_name, role = extract_speaker(name_raw)
+                if not role:
+                    role = SIS_EMOJI_ROLE.get(emoji, "unknown")
+                current_speaker = name_raw  # 思流格式保留原始名称
+                current_role = role
+                current_lines = []
+                current_start_line = line_no
+                continue
+
+            # 思流元数据行: > 创建/更新/消息数
+            if SIS_META_LINE.match(stripped):
+                continue
+
+            # 思流格式: --- 分隔符
+            if stripped.startswith("---"):
+                flush_message()
+                continue
+
+            # 思流格式: # 标题行
+            if stripped.startswith("#"):
+                flush_message()
+                continue
+
+            # 思流格式: 空行跳过
+            if not stripped:
+                continue
+
+            # 思流格式: 剩余行全是内容
+            if current_speaker:
+                current_lines.append(stripped)
+            continue
 
         # Case 1: > **Name**：content
         m_inline = SPEAKER_INLINE.match(stripped)

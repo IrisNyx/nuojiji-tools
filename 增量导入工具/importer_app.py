@@ -845,10 +845,19 @@ class ImporterApp(QMainWindow):
                 msgs = parse_md_file(md_path)
                 # 从文件名提取日期提示
                 date_hint = extract_date_from_filename(os.path.basename(md_path))
-                # 确保每条消息有 timestamp_ms（先设为0，后面自动分配）
+                # 确保每条消息有 timestamp_ms
                 for m in msgs:
                     if "timestamp_ms" not in m:
-                        m["timestamp_ms"] = 0
+                        # 思流新格式：真实时间戳 (YYYY-MM-DD HH:MM:SS) → epoch ms
+                        ts_str = m.get("timestamp", "")
+                        if ts_str:
+                            try:
+                                iso_str = ts_str.replace(" ", "T")
+                                m["timestamp_ms"] = dtstr_to_ms(iso_str)
+                            except Exception:
+                                m["timestamp_ms"] = 0
+                        else:
+                            m["timestamp_ms"] = 0
                 # 按文件分批添加（带日期提示）
                 self._model.addMessages(msgs, file_date_hint=date_hint)
                 self._update_count_label()
