@@ -51,6 +51,20 @@ def ms_to_date_str(ms: int) -> str:
     return dt.strftime("%Y-%m-%d")
 
 
+def _safe_ts(val) -> int:
+    """将 timestamp 值统一为 int (epoch ms)，兼容 str/int/float"""
+    if isinstance(val, int):
+        return val
+    if isinstance(val, float):
+        return int(val)
+    if isinstance(val, str):
+        try:
+            return dtstr_to_ms(val.replace(" ", "T").rstrip("Z"))
+        except Exception:
+            return 0
+    return 0
+
+
 def make_round_id(ts_ms: int) -> str:
     rand = ''.join(random.choice(string.ascii_lowercase + string.digits) for _ in range(10))
     return f"round_{ts_ms}_{rand}"
@@ -321,11 +335,11 @@ def merge_chat(
 
     # 更新元数据
     if all_msgs:
-        last_ts = all_msgs[-1].get("timestamp", 0)
-        if isinstance(last_ts, str):
-            last_ts = all_msgs[-1].get("id", 0)
-        export_date = ms_to_export_date(last_ts if isinstance(last_ts, int) else int(datetime.now(UTC).timestamp() * 1000))
-        last_message_date = last_ts if isinstance(last_ts, int) else int(datetime.now(CST).timestamp() * 1000)
+        last_ts = _safe_ts(all_msgs[-1].get("timestamp", 0))
+        if last_ts == 0:
+            last_ts = _safe_ts(all_msgs[-1].get("timestamp_ms", 0))
+        export_date = ms_to_export_date(last_ts if last_ts > 0 else int(datetime.now(UTC).timestamp() * 1000))
+        last_message_date = last_ts if last_ts > 0 else int(datetime.now(CST).timestamp() * 1000)
     else:
         export_date = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.") + "000Z"
         last_message_date = int(datetime.now(CST).timestamp() * 1000)
@@ -453,15 +467,15 @@ def merge_tm(
             for idx, rs in enumerate(result_sessions):
                 if rs.get("name") == session_name:
                     combined = rs["entries"] + new_entries
-                    # 按 timestamp 排序
-                    combined.sort(key=lambda x: x.get("timestamp", 0))
-                    first_ts = combined[0]["timestamp"]
-                    last_ts = combined[-1]["timestamp"]
+                    # 按 timestamp 排序（安全处理 str/int 混合）
+                    combined.sort(key=lambda x: _safe_ts(x.get("timestamp", 0)))
+                    first_ts = _safe_ts(combined[0]["timestamp"])
+                    last_ts = _safe_ts(combined[-1]["timestamp"])
                     result_sessions[idx] = {
                         **rs,
                         "entries": combined,
-                        "createdAt": min(rs.get("createdAt", first_ts), first_ts),
-                        "lastActiveAt": max(rs.get("lastActiveAt", last_ts), last_ts),
+                        "createdAt": min(_safe_ts(rs.get("createdAt", first_ts)), first_ts),
+                        "lastActiveAt": max(_safe_ts(rs.get("lastActiveAt", last_ts)), last_ts),
                     }
                     break
         else:
